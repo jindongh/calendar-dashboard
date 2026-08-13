@@ -1,0 +1,1005 @@
+<!DOCTYPE html>
+
+<html lang="en">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width,
+                 initial-scale=1.0"
+    >
+
+    <meta
+        name="theme-color"
+        content="#111111"
+    >
+
+    <title>Family Dashboard</title>
+
+    <link
+        rel="stylesheet"
+        href="/static/style.css"
+    >
+
+</head>
+
+
+<body>
+
+<div class="dashboard">
+
+    <!-- ========================= -->
+    <!-- HEADER -->
+    <!-- ========================= -->
+
+    <header class="header">
+
+        <div>
+
+            <div
+                id="date"
+                class="date"
+            ></div>
+
+            <div
+                id="subtitle"
+                class="subtitle"
+            >
+                Family Dashboard
+            </div>
+
+        </div>
+
+        <div
+            id="clock"
+            class="clock"
+        ></div>
+
+    </header>
+
+
+    <!-- ========================= -->
+    <!-- MAIN -->
+    <!-- ========================= -->
+
+    <main class="main">
+
+        <!-- ===================== -->
+        <!-- CALENDAR -->
+        <!-- ===================== -->
+
+        <section class="calendar-panel">
+
+            <div class="section-title">
+                Calendar
+            </div>
+
+
+            <!-- TODAY -->
+
+            <div class="calendar-section">
+
+                <div class="day-title">
+                    Today
+                </div>
+
+                <div
+                    id="today-events"
+                    class="events"
+                ></div>
+
+            </div>
+
+
+            <!-- TOMORROW -->
+
+            <div class="calendar-section">
+
+                <div class="day-title">
+                    Tomorrow
+                </div>
+
+                <div
+                    id="tomorrow-events"
+                    class="events"
+                ></div>
+
+            </div>
+
+
+            <!-- UPCOMING -->
+
+            <div class="calendar-section">
+
+                <div class="day-title">
+                    Upcoming
+                </div>
+
+                <div
+                    id="upcoming-events"
+                    class="events"
+                ></div>
+
+            </div>
+
+        </section>
+
+
+        <!-- ===================== -->
+        <!-- TASKS -->
+        <!-- ===================== -->
+
+        <section class="tasks-panel">
+
+            <div class="section-title">
+                To Do
+            </div>
+
+
+            <!-- OVERDUE -->
+
+            <div
+                id="overdue-section"
+                class="task-section"
+            >
+
+                <div class="task-category overdue-title">
+                    Overdue
+                </div>
+
+                <div
+                    id="overdue-tasks"
+                    class="tasks"
+                ></div>
+
+            </div>
+
+
+            <!-- TODAY -->
+
+            <div class="task-section">
+
+                <div class="task-category">
+                    Today
+                </div>
+
+                <div
+                    id="today-tasks"
+                    class="tasks"
+                ></div>
+
+            </div>
+
+
+            <!-- UPCOMING -->
+
+            <div class="task-section">
+
+                <div class="task-category">
+                    Upcoming
+                </div>
+
+                <div
+                    id="upcoming-tasks"
+                    class="tasks"
+                ></div>
+
+            </div>
+
+
+            <!-- NO DATE -->
+
+            <div class="task-section">
+
+                <div class="task-category">
+                    No Due Date(skipped)
+                </div>
+
+                <div
+                    id="undated-tasks"
+                    class="tasks"
+                ></div>
+
+            </div>
+
+        </section>
+
+    </main>
+
+
+    <!-- ========================= -->
+    <!-- FOOTER -->
+    <!-- ========================= -->
+
+    <footer>
+
+        <span>
+            Last updated:
+        </span>
+
+        <span id="updated">
+            --
+        </span>
+
+        <span
+            id="status"
+            class="status"
+        ></span>
+
+    </footer>
+
+</div>
+
+
+<script>
+
+
+/* =========================================
+   GLOBAL
+========================================= */
+
+let dashboardData = null;
+
+
+const TIME_ZONE =
+    "America/Los_Angeles";
+
+
+/* =========================================
+   DATE HELPERS
+========================================= */
+
+function getLocalDateString(
+    date = new Date()
+) {
+
+    return date.toLocaleDateString(
+        "en-CA",
+        {
+            timeZone: TIME_ZONE
+        }
+    );
+
+}
+
+
+function addDays(
+    dateString,
+    days
+) {
+
+    const date =
+        new Date(
+            dateString + "T12:00:00"
+        );
+
+    date.setDate(
+        date.getDate() + days
+    );
+
+    return date.toLocaleDateString(
+        "en-CA",
+        {
+            timeZone: TIME_ZONE
+        }
+    );
+
+}
+
+
+function formatDate(
+    dateString
+) {
+
+    const date =
+        new Date(
+            dateString + "T12:00:00"
+        );
+
+    return date.toLocaleDateString(
+        "en-US",
+        {
+            weekday: "short",
+            month: "short",
+            day: "numeric",
+            timeZone: TIME_ZONE
+        }
+    );
+
+}
+
+
+/* =========================================
+   HTML ESCAPING
+========================================= */
+
+function escapeHtml(text) {
+
+    const div =
+        document.createElement("div");
+
+    div.textContent =
+        text || "";
+
+    return div.innerHTML;
+
+}
+
+
+/* =========================================
+   EVENT RENDERING
+========================================= */
+
+function renderEvent(
+    event
+) {
+
+    const div =
+        document.createElement("div");
+
+    div.className =
+        "event";
+
+
+    const time =
+        document.createElement("div");
+
+    time.className =
+        "event-time";
+
+    time.textContent =
+        event.time;
+
+
+    const title =
+        document.createElement("div");
+
+    title.className =
+        "event-title";
+
+    title.innerHTML = `
+        <div class="event-title-main">
+            ${escapeHtml(event.title)}
+        </div>
+    
+        <div class="event-calendar">
+            ${escapeHtml(event.calendar_name)}
+        </div>
+    `;
+
+    div.appendChild(time);
+
+    div.appendChild(title);
+
+
+    return div;
+
+}
+
+
+function renderEvents(
+    containerId,
+    events
+) {
+
+    const container =
+        document.getElementById(
+            containerId
+        );
+
+    container.innerHTML = "";
+
+
+    if (!events.length) {
+
+        const empty =
+            document.createElement("div");
+
+        empty.className =
+            "empty";
+
+        empty.textContent =
+            "No events";
+
+        container.appendChild(empty);
+
+        return;
+
+    }
+
+
+    events.forEach(
+        event => {
+
+            container.appendChild(
+                renderEvent(event)
+            );
+
+        }
+    );
+
+}
+
+
+/* =========================================
+   TASK RENDERING
+========================================= */
+
+function createTaskElement(
+    task
+) {
+
+    const row =
+        document.createElement("div");
+
+    row.className =
+        "task";
+
+
+    const button =
+        document.createElement("button");
+
+    button.className =
+        "task-checkbox";
+
+    button.setAttribute(
+        "aria-label",
+        "Complete task"
+    );
+
+    button.innerHTML =
+        "☐";
+
+
+    const content =
+        document.createElement("div");
+
+    content.className =
+        "task-content";
+
+
+    const title =
+        document.createElement("div");
+
+    title.className =
+        "task-title";
+
+    title.innerHTML =
+        escapeHtml(task.title);
+
+
+    content.appendChild(title);
+
+
+    if (task.due) {
+
+        const due =
+            document.createElement("div");
+
+        due.className =
+            "task-due";
+
+        due.textContent =
+            task.due ===
+            getLocalDateString()
+                ? "Today"
+                : formatDate(task.due);
+
+        content.appendChild(due);
+
+    }
+
+
+    button.onclick =
+        async function() {
+
+            await completeTask(
+                task,
+                row,
+                button
+            );
+
+        };
+
+
+    row.appendChild(button);
+
+    row.appendChild(content);
+
+
+    return row;
+
+}
+
+
+/* =========================================
+   COMPLETE GOOGLE TASK
+========================================= */
+
+async function completeTask(
+    task,
+    row,
+    button
+) {
+
+    if (
+        button.disabled
+    ) {
+        return;
+    }
+
+
+    button.disabled =
+        true;
+
+    button.innerHTML =
+        "✓";
+
+
+    row.classList.add(
+        "completing"
+    );
+
+
+    try {
+
+        const response =
+            await fetch(
+                `/api/tasks/${encodeURIComponent(task.list_id)}/${encodeURIComponent(task.id)}/complete`,
+                {
+                    method: "POST"
+                }
+            );
+
+
+        const result =
+            await response.json();
+
+
+        if (!response.ok ||
+            !result.success) {
+
+            throw new Error(
+                result.error ||
+                "Failed to complete task"
+            );
+
+        }
+
+
+        row.classList.add(
+            "completed"
+        );
+
+
+        setTimeout(
+            () => {
+
+                row.remove();
+
+            },
+            600
+        );
+
+
+    } catch (error) {
+
+        console.error(error);
+
+
+        button.disabled =
+            false;
+
+        button.innerHTML =
+            "☐";
+
+        row.classList.remove(
+            "completing"
+        );
+
+
+        showStatus(
+            "Failed to complete task",
+            true
+        );
+
+    }
+
+}
+
+
+/* =========================================
+   TASK GROUPING
+========================================= */
+
+function renderTasks(
+    tasks
+) {
+
+    const containers = [
+        "overdue-tasks",
+        "today-tasks",
+        "upcoming-tasks",
+        "undated-tasks"
+    ];
+
+
+    containers.forEach(
+        id => {
+
+            document.getElementById(
+                id
+            ).innerHTML = "";
+
+        }
+    );
+
+
+    const today =
+        getLocalDateString();
+
+
+    const tomorrow =
+        addDays(
+            today,
+            1
+        );
+
+
+    const groups = {
+
+        overdue: [],
+
+        today: [],
+
+        upcoming: [],
+
+        undated: []
+
+    };
+
+
+    tasks.forEach(
+        task => {
+
+            if (!task.due) {
+
+                groups.undated.push(
+                    task
+                );
+
+            }
+
+            else if (
+                task.due < today
+            ) {
+
+                groups.overdue.push(
+                    task
+                );
+
+            }
+
+            else if (
+                task.due === today
+            ) {
+
+                groups.today.push(
+                    task
+                );
+
+            }
+
+            else {
+
+                groups.upcoming.push(
+                    task
+                );
+
+            }
+
+        }
+    );
+
+
+    renderTaskGroup(
+        "overdue-tasks",
+        groups.overdue
+    );
+
+
+    renderTaskGroup(
+        "today-tasks",
+        groups.today
+    );
+
+
+    renderTaskGroup(
+        "upcoming-tasks",
+        groups.upcoming
+    );
+
+
+    renderTaskGroup(
+        "undated-tasks",
+        groups.undated
+    );
+
+
+    const overdueSection =
+        document.getElementById(
+            "overdue-section"
+        );
+
+
+    overdueSection.style.display =
+        groups.overdue.length
+            ? "block"
+            : "none";
+
+}
+
+
+function renderTaskGroup(
+    containerId,
+    tasks
+) {
+
+    const container =
+        document.getElementById(
+            containerId
+        );
+
+
+    if (!tasks.length) {
+
+        return;
+
+    }
+
+
+    tasks.forEach(
+        task => {
+
+            container.appendChild(
+                createTaskElement(task)
+            );
+
+        }
+    );
+
+}
+
+
+/* =========================================
+   MAIN RENDER
+========================================= */
+
+function renderDashboard() {
+
+    if (!dashboardData) {
+
+        return;
+
+    }
+
+
+    const today =
+        getLocalDateString();
+
+
+    const tomorrow =
+        addDays(
+            today,
+            1
+        );
+
+
+    const todayEvents =
+        dashboardData.events.filter(
+            event =>
+                event.date === today
+        );
+
+
+    const tomorrowEvents =
+        dashboardData.events.filter(
+            event =>
+                event.date === tomorrow
+        );
+
+
+    const upcomingEvents =
+        dashboardData.events.filter(
+            event =>
+                event.date !== today &&
+                event.date !== tomorrow
+        );
+
+
+    renderEvents(
+        "today-events",
+        todayEvents
+    );
+
+
+    renderEvents(
+        "tomorrow-events",
+        tomorrowEvents
+    );
+
+
+    renderEvents(
+        "upcoming-events",
+        upcomingEvents
+    );
+
+
+    renderTasks(
+        dashboardData.tasks
+    );
+
+
+    document.getElementById(
+        "updated"
+    ).textContent =
+        dashboardData.updated;
+
+}
+
+
+/* =========================================
+   FETCH DATA
+========================================= */
+
+async function refresh() {
+
+    try {
+
+        const response =
+            await fetch(
+                "/api/data",
+                {
+                    cache: "no-store"
+                }
+            );
+
+
+        const result =
+            await response.json();
+
+
+        if (!response.ok ||
+            result.error) {
+
+            throw new Error(
+                result.error ||
+                "Dashboard request failed"
+            );
+
+        }
+
+
+        dashboardData =
+            result;
+
+
+        renderDashboard();
+
+
+        showStatus(
+            "● Connected",
+            false
+        );
+
+
+    } catch (error) {
+
+        console.error(error);
+
+
+        showStatus(
+            "● Connection error",
+            true
+        );
+
+    }
+
+}
+
+
+/* =========================================
+   STATUS
+========================================= */
+
+function showStatus(
+    text,
+    error
+) {
+
+    const status =
+        document.getElementById(
+            "status"
+        );
+
+
+    status.textContent =
+        text;
+
+
+    status.className =
+        error
+            ? "status error"
+            : "status";
+
+}
+
+
+/* =========================================
+   CLOCK
+========================================= */
+
+function updateClock() {
+
+    const now =
+        new Date();
+
+
+    document.getElementById(
+        "date"
+    ).textContent =
+        now.toLocaleDateString(
+            "en-US",
+            {
+                weekday: "long",
+                month: "long",
+                day: "numeric",
+                timeZone: TIME_ZONE
+            }
+        );
+
+
+    document.getElementById(
+        "clock"
+    ).textContent =
+        now.toLocaleTimeString(
+            "en-US",
+            {
+                hour: "numeric",
+                minute: "2-digit",
+                timeZone: TIME_ZONE
+            }
+        );
+
+}
+
+
+/* =========================================
+   START
+========================================= */
+
+refresh();
+
+updateClock();
+
+
+setInterval(
+    refresh,
+    60 * 1000
+);
+
+
+setInterval(
+    updateClock,
+    1000
+);
+
+</script>
+
+
+</body>
+
+</html>

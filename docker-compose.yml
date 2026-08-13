@@ -1,0 +1,30 @@
+services:
+
+  calendar-dashboard:
+
+    build: .
+
+    container_name: calendar-dashboard
+
+    restart: unless-stopped
+
+    network_mode: host
+
+    environment:
+      TZ: America/Los_Angeles
+
+    volumes:
+      - ./token.json:/app/token.json
+
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080')"
+        ]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
