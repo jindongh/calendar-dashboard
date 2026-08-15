@@ -5,6 +5,9 @@ from google.auth.transport.requests import Request
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from pathlib import Path
+import json
+from urllib.request import urlopen
+from urllib.parse import urlencode
 
 app = Flask(__name__)
 
@@ -16,6 +19,77 @@ SCOPES = [
 ]
 
 TIMEZONE = ZoneInfo("America/Los_Angeles")
+WEATHER_LATITUDE = 37.3688
+WEATHER_LONGITUDE = -122.0363
+
+
+WEATHER_CODES = {
+    0: ("☀️", "Clear"),
+    1: ("🌤️", "Mainly clear"),
+    2: ("⛅", "Partly cloudy"),
+    3: ("☁️", "Cloudy"),
+    45: ("🌫️", "Fog"),
+    48: ("🌫️", "Fog"),
+    51: ("🌦️", "Light drizzle"),
+    53: ("🌦️", "Drizzle"),
+    55: ("🌧️", "Heavy drizzle"),
+    61: ("🌦️", "Light rain"),
+    63: ("🌧️", "Rain"),
+    65: ("🌧️", "Heavy rain"),
+    71: ("🌨️", "Light snow"),
+    73: ("🌨️", "Snow"),
+    75: ("❄️", "Heavy snow"),
+    80: ("🌦️", "Rain showers"),
+    81: ("🌧️", "Rain showers"),
+    82: ("⛈️", "Heavy showers"),
+    95: ("⛈️", "Thunderstorm"),
+    96: ("⛈️", "Thunderstorm"),
+    99: ("⛈️", "Thunderstorm"),
+}
+
+
+def get_weather():
+    params = urlencode({
+        "latitude": WEATHER_LATITUDE,
+        "longitude": WEATHER_LONGITUDE,
+        "current": "temperature_2m,weather_code",
+        "daily": "temperature_2m_max,temperature_2m_min",
+        "temperature_unit": "fahrenheit",
+        "timezone": "America/Los_Angeles",
+        "forecast_days": 1,
+    })
+
+    url = (
+        "https://api.open-meteo.com/v1/forecast?"
+        + params
+    )
+
+    with urlopen(url, timeout=10) as response:
+        data = json.loads(response.read().decode("utf-8"))
+
+    current = data["current"]
+    daily = data["daily"]
+
+    code = current["weather_code"]
+
+    icon, description = WEATHER_CODES.get(
+        code,
+        ("🌡️", "Unknown")
+    )
+
+    return {
+        "temperature": round(
+            current["temperature_2m"]
+        ),
+        "high": round(
+            daily["temperature_2m_max"][0]
+        ),
+        "low": round(
+            daily["temperature_2m_min"][0]
+        ),
+        "icon": icon,
+        "description": description,
+    }
 
 
 def load_credentials():
@@ -336,6 +410,21 @@ def data():
 
         return jsonify({
             "error": str(e),
+        }), 500
+
+
+@app.route("/api/weather")
+def weather():
+    try:
+        return jsonify(get_weather())
+    except Exception as e:
+        print(
+            "WEATHER ERROR:",
+            repr(e)
+        )
+
+        return jsonify({
+            "error": str(e)
         }), 500
 
 

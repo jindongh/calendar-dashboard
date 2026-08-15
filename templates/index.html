@@ -37,20 +37,25 @@
 
     <header class="header">
 
-        <div>
+        <div
+            id="date"
+            class="date"
+        ></div>
 
-            <div
-                id="date"
-                class="date"
-            ></div>
-
-            <div
-                id="subtitle"
-                class="subtitle"
+        <div
+            id="weather"
+            class="weather"
+        >
+            <span id="weather-icon">☀️</span>
+    
+            <span id="weather-temp">--°F</span>
+    
+            <span
+                id="weather-details"
+                class="weather-details"
             >
-                Family Dashboard
-            </div>
-
+                -- / --
+            </span>
         </div>
 
         <div
@@ -243,6 +248,7 @@
 
 let dashboardData = null;
 
+let weatherData = null;
 
 const TIME_ZONE =
     "America/Los_Angeles";
@@ -251,6 +257,68 @@ const TIME_ZONE =
 /* =========================================
    DATE HELPERS
 ========================================= */
+
+async function refreshWeather() {
+
+    try {
+
+        const response = await fetch(
+            "/api/weather",
+            {
+                cache: "no-store"
+            }
+        );
+
+        const result =
+            await response.json();
+
+        if (!response.ok ||
+            result.error) {
+
+            throw new Error(
+                result.error ||
+                "Weather request failed"
+            );
+
+        }
+
+        weatherData = result;
+
+        document.getElementById(
+            "weather-icon"
+        ).textContent =
+            result.icon;
+
+        document.getElementById(
+            "weather-temp"
+        ).textContent =
+            `${result.temperature}°F`;
+
+        document.getElementById(
+            "weather-details"
+        ).textContent =
+            `H ${result.high}° / L ${result.low}°`;
+
+    } catch (error) {
+
+        console.error(
+            "Weather error:",
+            error
+        );
+
+        document.getElementById(
+            "weather-icon"
+        ).textContent = "🌡️";
+
+        document.getElementById(
+            "weather-temp"
+        ).textContent = "--°F";
+
+        document.getElementById(
+            "weather-details"
+        ).textContent = "-- / --";
+    }
+}
 
 function getLocalDateString(
     date = new Date()
@@ -983,6 +1051,8 @@ function updateClock() {
 
 refresh();
 
+refreshWeather();
+
 updateClock();
 
 
@@ -991,6 +1061,10 @@ setInterval(
     60 * 1000
 );
 
+setInterval(
+    refreshWeather,
+    15 * 60 * 1000
+);
 
 setInterval(
     updateClock,
