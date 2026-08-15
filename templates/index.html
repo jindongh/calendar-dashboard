@@ -45,6 +45,8 @@
         <div
             id="weather"
             class="weather"
+	    onclick="toggleTemperatureUnit()"
+	    title="Click to switch °F / °C"
         >
             <span id="weather-icon">☀️</span>
     
@@ -250,6 +252,9 @@ let dashboardData = null;
 
 let weatherData = null;
 
+let temperatureUnit =
+    localStorage.getItem("temperatureUnit") || "C";
+
 const TIME_ZONE =
     "America/Los_Angeles";
 
@@ -257,6 +262,43 @@ const TIME_ZONE =
 /* =========================================
    DATE HELPERS
 ========================================= */
+
+function fahrenheitToCelsius(f) {
+    return (f - 32) * 5 / 9;
+}
+
+function formatTemperature(fahrenheit) {
+    if (temperatureUnit === "C") {
+        return `${Math.round(fahrenheitToCelsius(fahrenheit))}°C`;
+    }
+
+    return `${Math.round(fahrenheit)}°F`;
+}
+
+function updateWeatherDisplay() {
+    if (!weatherData) {
+        return;
+    }
+
+    document.getElementById("weather-temp").textContent =
+        formatTemperature(weatherData.temperature);
+
+    document.getElementById("weather-details").textContent =
+        `H ${formatTemperature(weatherData.high)} / ` +
+        `L ${formatTemperature(weatherData.low)}`;
+}
+
+function toggleTemperatureUnit() {
+    temperatureUnit =
+        temperatureUnit === "F" ? "C" : "F";
+
+    localStorage.setItem(
+        "temperatureUnit",
+        temperatureUnit
+    );
+
+    updateWeatherDisplay();
+}
 
 async function refreshWeather() {
 
@@ -289,16 +331,7 @@ async function refreshWeather() {
         ).textContent =
             result.icon;
 
-        document.getElementById(
-            "weather-temp"
-        ).textContent =
-            `${result.temperature}°F`;
-
-        document.getElementById(
-            "weather-details"
-        ).textContent =
-            `H ${result.high}° / L ${result.low}°`;
-
+        updateWeatherDisplay();
     } catch (error) {
 
         console.error(
