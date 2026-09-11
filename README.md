@@ -27,10 +27,30 @@
 ## Run
 
 ### Run the docker
-* `docker compose build --no-cache`
-* `docker compose up -d`
+* docker will mass up the network, because it uses some broadcast.
 
-### Run the docker in another machine.
-If you want to run the docker in a new machine, just clone the repository and token.json, and then do the same thing:
-* `docker compose build --no-cache`
-* `docker compose up -d`
+### Run as a service
+```
+sudo nano /etc/systemd/system/calendar-dashboard.service
+[Unit]
+Description=Calendar Dashboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/calendar-dashboard
+ExecStart=/home/pi/calendar-dashboard/venv/bin/python /home/pi/calendar-dashboard/start.py
+Restart=always
+RestartSec=5
+Environment="HOME=/home/pi"
+
+[Install]
+WantedBy=multi-user.target
+
+sudo systemctl daemon-reload
+sudo systemctl enable calendar-dashboard
+sudo systemctl start calendar-dashboard
+sudo systemctl status calendar-dashboard
+```
