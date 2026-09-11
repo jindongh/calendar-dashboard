@@ -18,6 +18,8 @@ DASHBOARD_URL = f"http://{PI_IP}:8080"
 CHECK_INTERVAL = 10
 RETRY_INTERVAL = 30
 
+QUIET_START_HOUR = 22
+QUIET_END_HOUR = 7
 
 # ============================================================
 # Logging
@@ -27,6 +29,11 @@ def log(message):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"[{now}] {message}", flush=True)
 
+def is_quiet_hours():
+    hour = datetime.now().hour
+
+    # Quiet period: 22:00 - 07:00
+    return hour >= QUIET_START_HOUR or hour < QUIET_END_HOUR
 
 # ============================================================
 # Find our Nest Hub
@@ -219,6 +226,29 @@ def main():
                 cast
             )
 
+            if is_quiet_hours():
+                if app_id is None:
+                    log("Nest Hub unavailable during quiet hours.")
+                    cast = None
+                    time.sleep(RETRY_INTERVAL)
+                    continue
+                if app_id == APP_DASHCAST:
+                    log("Quiet hours: stopping Dashboard Cast...")
+                    try:
+                        cast.quit_app()
+                        log("Dashboard Cast stopped.")
+                    except Exception as e:
+                        log(
+                                f"Failed to stop Dashboard Cast: "
+                                f"{type(e).__name__}: {e}"
+                                )
+                else:
+                    log(
+                            f"Quiet hours: Dashboard is not running "
+                            f"(APP_ID={app_id}, APP={app_name})"
+                            )
+                time.sleep(CHECK_INTERVAL)
+                continue
 
             # -------------------------------------------------
             # Nest Hub disconnected
