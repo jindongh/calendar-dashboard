@@ -59,11 +59,13 @@ class CupertinoLibraryClient:
 
     def login(self, card_number: str, pin: str) -> bool:
         """Authenticate with BiblioCommons using library card number and PIN."""
-        login_url = f"https://{self.subdomain}.bibliocommons.com/user/login?destination=x"
+        login_url = f"https://{self.subdomain}.bibliocommons.com/user/login"
         logger.info(f"Connecting to library login page ({self.subdomain}.bibliocommons.com)...")
 
         resp = self.session.get(login_url, timeout=20)
         resp.raise_for_status()
+
+        post_url = resp.url
 
         # Extract Rails CSRF authenticity token
         m = re.search(r'name=[\"\']authenticity_token[\"\'][^>]*value=[\"\']([^\"\']+)[\"\']', resp.text)
@@ -86,19 +88,21 @@ class CupertinoLibraryClient:
         }
 
         post_headers = {
-            "Referer": login_url,
+            "Referer": post_url,
             "Origin": f"https://{self.subdomain}.bibliocommons.com",
         }
 
         logger.info("Submitting library credentials...")
-        post_resp = self.session.post(
-            login_url,
+        # Note: Do not raise_for_status() on post_resp because redirects after successful
+        # login might hit landing URLs that return 404, but the required session cookies
+        # (bc_access_token & session_id) are already captured in session.cookies.
+        self.session.post(
+            post_url,
             data=post_data,
             headers=post_headers,
             allow_redirects=True,
             timeout=25,
         )
-        post_resp.raise_for_status()
 
         # Extract authentication cookies
         cookies = self.session.cookies.get_dict()
