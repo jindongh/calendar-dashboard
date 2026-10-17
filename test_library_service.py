@@ -1,13 +1,10 @@
 import unittest
 from datetime import date, timedelta
-from library_service import filter_loans_due_next_week, is_book_already_in_tasks
+from library_service import filter_loans_due_next_week, is_book_already_in_tasks, clean_title
 
 class TestLibraryService(unittest.TestCase):
     def test_filter_loans_due_next_week(self):
-        # Suppose ref_date is Saturday, Oct 17
         ref_date = date(2026, 10, 17)
-        # Next Sunday is Oct 25 (+8 days)
-
         loans = [
             {"title": "Book Overdue", "due_date": date(2026, 10, 10)},
             {"title": "Book Today", "due_date": date(2026, 10, 17)},
@@ -26,6 +23,37 @@ class TestLibraryService(unittest.TestCase):
         self.assertNotIn("Book Beyond Next Week", titles)
         self.assertEqual(len(filtered), 4)
 
+    def test_clean_title(self):
+        self.assertEqual(clean_title("Sonic Prime"), "sonic prime")
+        self.assertEqual(clean_title("Return: Sonic Prime"), "sonic prime")
+        self.assertEqual(clean_title("Return: Sonic Prime. Volume 1"), "sonic prime")
+        self.assertEqual(clean_title("Sonic Prime: Shattered"), "sonic prime")
+        self.assertEqual(clean_title("Return book: Sonic Prime [Season 1]"), "sonic prime")
+
+    def test_sonic_prime_completed_duplicate(self):
+        # Scenario where task in Google Tasks was completed
+        existing_tasks = [
+            {
+                "id": "t1",
+                "title": "Return: Sonic Prime",
+                "status": "completed",
+                "notes": "Library: Cupertino Library (SCCLD)\nDue Date: Sun, Oct 25, 2026",
+                "hidden": True,
+            }
+        ]
+
+        # Case A: Library returns 'Sonic Prime. Volume 1'
+        book_a = {"title": "Sonic Prime. Volume 1", "checkout_id": "123456"}
+        is_dup, reason = is_book_already_in_tasks(book_a, existing_tasks)
+        self.assertTrue(is_dup, f"Expected duplicate but got False. Reason: {reason}")
+        self.assertIn("completed", reason)
+
+        # Case B: Checked in sync_state
+        sync_state = {"synced_checkout_ids": {"123456": {"title": "Sonic Prime"}}, "synced_titles": ["sonic prime"]}
+        is_dup_state, reason_state = is_book_already_in_tasks(book_a, [], sync_state=sync_state)
+        self.assertTrue(is_dup_state)
+        self.assertIn("sync history", reason_state)
+
     def test_is_book_already_in_tasks_completed(self):
         existing_tasks = [
             {
@@ -43,18 +71,15 @@ class TestLibraryService(unittest.TestCase):
             },
         ]
 
-        # Book 1: Already completed in todo -> should be detected as duplicate!
         book_completed = {"title": "Clean Code", "checkout_id": "987654"}
         is_dup, reason = is_book_already_in_tasks(book_completed, existing_tasks)
         self.assertTrue(is_dup)
         self.assertIn("completed", reason)
 
-        # Book 2: Active in todo -> duplicate!
         book_active = {"title": "Design Patterns", "checkout_id": "112233"}
         is_dup, reason = is_book_already_in_tasks(book_active, existing_tasks)
         self.assertTrue(is_dup)
 
-        # Book 3: Brand new book -> not duplicate!
         book_new = {"title": "Refactoring", "checkout_id": "556677"}
         is_dup, reason = is_book_already_in_tasks(book_new, existing_tasks)
         self.assertFalse(is_dup)

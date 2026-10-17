@@ -23,6 +23,7 @@ from googleapiclient.discovery import build
 
 BASE_DIR = Path(__file__).resolve().parent
 CONFIG_PATH = BASE_DIR / "library_config.json"
+STATE_PATH = BASE_DIR / "library_sync_state.json"
 TOKEN_PATH = BASE_DIR / "token.json"
 DEFAULT_TIMEZONE = ZoneInfo("America/Los_Angeles")
 
@@ -257,9 +258,41 @@ def filter_loans_due_next_week(loans: list[dict], ref_date: date = None, days_ah
     return due_loans
 
 
+def clean_title(title: str) -> str:
+    """Normalize book/task title by stripping prefixes, subtitles, volume info, and punctuation."""
+    if not title:
+        return ""
+    t = re.sub(r'^(return|return book|还书)\s*[:：]\s*', '', title, flags=re.I)
+    t = t.strip('《》""\'\'()[]【】 ')
+    t = re.split(r'[:：\-/]', t)[0]
+    t = re.sub(r'\b(vol|volume|season|episode|part|bk|book)\b.*', '', t, flags=re.I)
+    t = re.sub(r'[^\w\s]', ' ', t)
+    return ' '.join(t.lower().split())
+
+
+def load_sync_state() -> dict:
+    """Load persistent sync state from library_sync_state.json."""
+    if STATE_PATH.exists():
+        try:
+            with open(STATE_PATH, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            logger.warning(f"Failed to read sync state file: {e}")
+    return {"synced_checkout_ids": {}, "synced_titles": []}
+
+
+def save_sync_state(state: dict):
+    """Save persistent sync state to library_sync_state.json."""
+    try:
+        with open(STATE_PATH, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        logger.error(f"Failed to save sync state file: {e}")
+
+
 def load_all_existing_tasks(tasks_service, target_tasklist_id: str) -> list[dict]:
     """
-    Fetch all tasks (including completed and hidden) with pagination
+    Fetch all tasks (including completed, hidden, and cleared/deleted) with pagination
     from target task list and other visible task lists to avoid adding duplicate tasks.
     """
     all_tasks = []
@@ -281,6 +314,7 @@ def load_all_existing_tasks(tasks_service, target_tasklist_id: str) -> list[dict
                     tasklist=t_id,
                     showCompleted=True,
                     showHidden=True,
+                    showDeleted=True,
                     maxResults=100,
                     pageToken=page_token,
                 ).execute()
@@ -295,39 +329,57 @@ def load_all_existing_tasks(tasks_service, target_tasklist_id: str) -> list[dict
     return all_tasks
 
 
-def is_book_already_in_tasks(book: dict, existing_tasks: list[dict]) -> tuple[bool, str]:
+def is_book_already_in_tasks(book: dict, existing_tasks: list[dict], sync_state: dict = None) -> tuple[bool, str]:
     """
-    Check if a book is already present in tasks (active, completed, or hidden).
+    Check if a book is already present in tasks (active, completed, hidden, or deleted)
+    or was previously recorded in local sync state.
     Returns (is_duplicate, reason).
     """
-    book_title = book.get("title", "").strip().lower()
+    book_raw_title = book.get("title", "").strip()
+    book_clean = clean_title(book_raw_title)
     checkout_id = str(book.get("checkout_id", "")).strip()
     checkout_id_marker = f"checkout id: {checkout_id}".lower() if checkout_id else None
 
-    expected_titles = {
-        f"return: {book_title}",
-        f"return book: {book_title}",
-        book_title,
-    }
+    # 1. Check local persistent sync state
+    if sync_state:
+        synced_ids = sync_state.get("synced_checkout_ids", {})
+        if checkout_id and checkout_id in synced_ids:
+            return True, f"Recorded in sync history (Checkout ID {checkout_id})"
 
+        synced_titles = sync_state.get("synced_titles", [])
+        if book_clean and book_clean in synced_titles:
+            return True, f"Recorded in sync history (Title '{book_clean}')"
+
+    # 2. Check all Google Tasks (including completed, hidden, deleted)
     for task in existing_tasks:
-        task_title = task.get("title", "").strip().lower()
+        task_raw_title = task.get("title", "").strip()
+        task_clean = clean_title(task_raw_title)
         task_notes = task.get("notes", "").lower()
         task_status = task.get("status", "needsAction")
-        is_completed = (task_status == "completed" or task.get("hidden") is True)
+        is_completed = (
+            task_status == "completed"
+            or task.get("hidden") is True
+            or task.get("deleted") is True
+        )
         status_suffix = " [completed]" if is_completed else ""
 
-        # 1. Match by Checkout ID in notes (exact identifier from library)
+        # A. Match by Checkout ID in notes (library unique identifier)
         if checkout_id_marker and checkout_id_marker in task_notes:
             return True, f"Matched Checkout ID {checkout_id}{status_suffix}"
 
-        # 2. Match by exact title variants
-        if task_title in expected_titles:
-            return True, f"Matched task title '{task.get('title')}'{status_suffix}"
+        # B. Match by normalized title (ignoring subtitles, volume info, case, punctuation)
+        if book_clean and task_clean:
+            if book_clean == task_clean:
+                return True, f"Matched normalized title '{task_raw_title}'{status_suffix}"
 
-        # 3. Match if task title starts with 'return' and contains the full book title
-        if (task_title.startswith("return:") or task_title.startswith("return book:")) and book_title in task_title:
-            return True, f"Matched return title pattern '{task.get('title')}'{status_suffix}"
+            # Substring match if sufficiently distinctive (>= 4 chars)
+            if len(book_clean) >= 4 and len(task_clean) >= 4:
+                if book_clean in task_clean or task_clean in book_clean:
+                    return True, f"Matched title pattern '{task_raw_title}'{status_suffix}"
+
+        # C. Match book title mentioned in notes
+        if book_clean and len(book_clean) >= 4 and book_clean in task_notes:
+            return True, f"Matched title in notes for '{task_raw_title}'{status_suffix}"
 
     return False, ""
 
@@ -369,11 +421,14 @@ def sync_library_tasks(config: dict = None) -> dict:
     tasks_service = load_google_tasks_service()
     task_list_id = get_or_create_tasklist(tasks_service, task_list_name)
 
-    # Fetch ALL existing tasks (including completed and hidden) to avoid duplicates
+    # Load persistent sync state
+    sync_state = load_sync_state()
+
+    # Fetch ALL existing tasks (including completed, hidden, deleted)
     existing_tasks = load_all_existing_tasks(tasks_service, task_list_id)
     logger.info(
         f"Retrieved {len(existing_tasks)} existing tasks across task lists "
-        "(including completed and hidden) for duplicate verification."
+        "(including completed, hidden, and cleared) for duplicate verification."
     )
 
     added_tasks = []
@@ -382,9 +437,20 @@ def sync_library_tasks(config: dict = None) -> dict:
     for book in due_loans:
         expected_title = f"Return: {book['title']}"
 
-        is_dup, reason = is_book_already_in_tasks(book, existing_tasks)
+        is_dup, reason = is_book_already_in_tasks(book, existing_tasks, sync_state=sync_state)
         if is_dup:
             logger.info(f"Skipping already existing book in todo: '{book['title']}' ({reason})")
+            # Ensure recorded in sync_state for future runs
+            checkout_id = str(book.get("checkout_id", "")).strip()
+            book_clean = clean_title(book.get("title", ""))
+            if checkout_id:
+                sync_state.setdefault("synced_checkout_ids", {})[checkout_id] = {
+                    "title": book.get("title"),
+                    "matched": reason,
+                }
+            if book_clean and book_clean not in sync_state.setdefault("synced_titles", []):
+                sync_state["synced_titles"].append(book_clean)
+
             skipped_tasks.append({
                 "title": book["title"],
                 "reason": reason,
@@ -413,7 +479,7 @@ def sync_library_tasks(config: dict = None) -> dict:
         logger.info(f"Adding task: '{expected_title}' (Due: {book['due_date']})")
         created = tasks_service.tasks().insert(tasklist=task_list_id, body=task_body).execute()
         
-        # Add newly created task to existing_tasks in-memory to prevent duplicates in same run
+        # Add newly created task to existing_tasks in-memory
         existing_tasks.append({
             "id": created.get("id"),
             "title": expected_title,
@@ -421,11 +487,25 @@ def sync_library_tasks(config: dict = None) -> dict:
             "status": "needsAction",
         })
 
+        # Record in sync_state
+        checkout_id = str(book.get("checkout_id", "")).strip()
+        book_clean = clean_title(book.get("title", ""))
+        if checkout_id:
+            sync_state.setdefault("synced_checkout_ids", {})[checkout_id] = {
+                "title": book.get("title"),
+                "synced_at": datetime.now(DEFAULT_TIMEZONE).isoformat(),
+            }
+        if book_clean and book_clean not in sync_state.setdefault("synced_titles", []):
+            sync_state["synced_titles"].append(book_clean)
+
         added_tasks.append({
             "task_id": created.get("id"),
             "title": expected_title,
             "due_date": book["due_date"].isoformat(),
         })
+
+    # Save updated persistent state to disk
+    save_sync_state(sync_state)
 
     logger.info(
         f"Library sync complete! Added: {len(added_tasks)}, "
