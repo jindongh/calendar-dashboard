@@ -298,14 +298,6 @@ def load_all_existing_tasks(tasks_service, target_tasklist_id: str) -> list[dict
     all_tasks = []
     tasklist_ids = [target_tasklist_id]
 
-    try:
-        tasklists_res = tasks_service.tasklists().list(maxResults=100).execute()
-        for tl in tasklists_res.get("items", []):
-            if tl["id"] not in tasklist_ids:
-                tasklist_ids.append(tl["id"])
-    except Exception as e:
-        logger.warning(f"Could not list all tasklists: {e}. Scanning target list only.")
-
     for t_id in tasklist_ids:
         page_token = None
         while True:
@@ -313,8 +305,6 @@ def load_all_existing_tasks(tasks_service, target_tasklist_id: str) -> list[dict
                 res = tasks_service.tasks().list(
                     tasklist=t_id,
                     showCompleted=True,
-                    showHidden=True,
-                    showDeleted=True,
                     maxResults=100,
                     pageToken=page_token,
                 ).execute()
@@ -335,8 +325,6 @@ def is_book_already_in_tasks(book: dict, existing_tasks: list[dict], sync_state:
     or was previously recorded in local sync state.
     Returns (is_duplicate, reason).
     """
-    book_raw_title = book.get("title", "").strip()
-    book_clean = clean_title(book_raw_title)
     checkout_id = str(book.get("checkout_id", "")).strip()
     checkout_id_marker = f"checkout id: {checkout_id}".lower() if checkout_id else None
 
@@ -346,40 +334,11 @@ def is_book_already_in_tasks(book: dict, existing_tasks: list[dict], sync_state:
         if checkout_id and checkout_id in synced_ids:
             return True, f"Recorded in sync history (Checkout ID {checkout_id})"
 
-        synced_titles = sync_state.get("synced_titles", [])
-        if book_clean and book_clean in synced_titles:
-            return True, f"Recorded in sync history (Title '{book_clean}')"
-
     # 2. Check all Google Tasks (including completed, hidden, deleted)
     for task in existing_tasks:
-        task_raw_title = task.get("title", "").strip()
-        task_clean = clean_title(task_raw_title)
-        task_notes = task.get("notes", "").lower()
-        task_status = task.get("status", "needsAction")
-        is_completed = (
-            task_status == "completed"
-            or task.get("hidden") is True
-            or task.get("deleted") is True
-        )
-        status_suffix = " [completed]" if is_completed else ""
-
         # A. Match by Checkout ID in notes (library unique identifier)
         if checkout_id_marker and checkout_id_marker in task_notes:
             return True, f"Matched Checkout ID {checkout_id}{status_suffix}"
-
-        # B. Match by normalized title (ignoring subtitles, volume info, case, punctuation)
-        if book_clean and task_clean:
-            if book_clean == task_clean:
-                return True, f"Matched normalized title '{task_raw_title}'{status_suffix}"
-
-            # Substring match if sufficiently distinctive (>= 4 chars)
-            if len(book_clean) >= 4 and len(task_clean) >= 4:
-                if book_clean in task_clean or task_clean in book_clean:
-                    return True, f"Matched title pattern '{task_raw_title}'{status_suffix}"
-
-        # C. Match book title mentioned in notes
-        if book_clean and len(book_clean) >= 4 and book_clean in task_notes:
-            return True, f"Matched title in notes for '{task_raw_title}'{status_suffix}"
 
     return False, ""
 
