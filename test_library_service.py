@@ -1,6 +1,6 @@
 import unittest
 from datetime import date, timedelta
-from library_service import filter_loans_due_next_week
+from library_service import filter_loans_due_next_week, is_book_already_in_tasks
 
 class TestLibraryService(unittest.TestCase):
     def test_filter_loans_due_next_week(self):
@@ -25,6 +25,39 @@ class TestLibraryService(unittest.TestCase):
         self.assertIn("Book Next Sunday", titles)
         self.assertNotIn("Book Beyond Next Week", titles)
         self.assertEqual(len(filtered), 4)
+
+    def test_is_book_already_in_tasks_completed(self):
+        existing_tasks = [
+            {
+                "id": "1",
+                "title": "Return: Clean Code",
+                "status": "completed",
+                "notes": "Due Date: 2026-10-20\nCheckout ID: 987654",
+                "hidden": True,
+            },
+            {
+                "id": "2",
+                "title": "Return: Design Patterns",
+                "status": "needsAction",
+                "notes": "Checkout ID: 112233",
+            },
+        ]
+
+        # Book 1: Already completed in todo -> should be detected as duplicate!
+        book_completed = {"title": "Clean Code", "checkout_id": "987654"}
+        is_dup, reason = is_book_already_in_tasks(book_completed, existing_tasks)
+        self.assertTrue(is_dup)
+        self.assertIn("completed", reason)
+
+        # Book 2: Active in todo -> duplicate!
+        book_active = {"title": "Design Patterns", "checkout_id": "112233"}
+        is_dup, reason = is_book_already_in_tasks(book_active, existing_tasks)
+        self.assertTrue(is_dup)
+
+        # Book 3: Brand new book -> not duplicate!
+        book_new = {"title": "Refactoring", "checkout_id": "556677"}
+        is_dup, reason = is_book_already_in_tasks(book_new, existing_tasks)
+        self.assertFalse(is_dup)
 
 if __name__ == "__main__":
     unittest.main()

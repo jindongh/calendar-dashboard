@@ -257,13 +257,88 @@ def filter_loans_due_next_week(loans: list[dict], ref_date: date = None, days_ah
     return due_loans
 
 
+def load_all_existing_tasks(tasks_service, target_tasklist_id: str) -> list[dict]:
+    """
+    Fetch all tasks (including completed and hidden) with pagination
+    from target task list and other visible task lists to avoid adding duplicate tasks.
+    """
+    all_tasks = []
+    tasklist_ids = [target_tasklist_id]
+
+    try:
+        tasklists_res = tasks_service.tasklists().list(maxResults=100).execute()
+        for tl in tasklists_res.get("items", []):
+            if tl["id"] not in tasklist_ids:
+                tasklist_ids.append(tl["id"])
+    except Exception as e:
+        logger.warning(f"Could not list all tasklists: {e}. Scanning target list only.")
+
+    for t_id in tasklist_ids:
+        page_token = None
+        while True:
+            try:
+                res = tasks_service.tasks().list(
+                    tasklist=t_id,
+                    showCompleted=True,
+                    showHidden=True,
+                    maxResults=100,
+                    pageToken=page_token,
+                ).execute()
+                all_tasks.extend(res.get("items", []))
+                page_token = res.get("nextPageToken")
+                if not page_token:
+                    break
+            except Exception as e:
+                logger.error(f"Error fetching tasks from tasklist {t_id}: {e}")
+                break
+
+    return all_tasks
+
+
+def is_book_already_in_tasks(book: dict, existing_tasks: list[dict]) -> tuple[bool, str]:
+    """
+    Check if a book is already present in tasks (active, completed, or hidden).
+    Returns (is_duplicate, reason).
+    """
+    book_title = book.get("title", "").strip().lower()
+    checkout_id = str(book.get("checkout_id", "")).strip()
+    checkout_id_marker = f"checkout id: {checkout_id}".lower() if checkout_id else None
+
+    expected_titles = {
+        f"return: {book_title}",
+        f"return book: {book_title}",
+        book_title,
+    }
+
+    for task in existing_tasks:
+        task_title = task.get("title", "").strip().lower()
+        task_notes = task.get("notes", "").lower()
+        task_status = task.get("status", "needsAction")
+        is_completed = (task_status == "completed" or task.get("hidden") is True)
+        status_suffix = " [completed]" if is_completed else ""
+
+        # 1. Match by Checkout ID in notes (exact identifier from library)
+        if checkout_id_marker and checkout_id_marker in task_notes:
+            return True, f"Matched Checkout ID {checkout_id}{status_suffix}"
+
+        # 2. Match by exact title variants
+        if task_title in expected_titles:
+            return True, f"Matched task title '{task.get('title')}'{status_suffix}"
+
+        # 3. Match if task title starts with 'return' and contains the full book title
+        if (task_title.startswith("return:") or task_title.startswith("return book:")) and book_title in task_title:
+            return True, f"Matched return title pattern '{task.get('title')}'{status_suffix}"
+
+    return False, ""
+
+
 def sync_library_tasks(config: dict = None) -> dict:
     """
     Main synchronization routine:
     1. Log into Cupertino Library.
     2. Retrieve loans.
     3. Filter books due next week (or overdue).
-    4. Sync with Google Tasks in the 'Library' list (preventing duplicates).
+    4. Sync with Google Tasks in the 'Library' list (preventing duplicates, even if completed).
     """
     if config is None:
         config = load_library_config()
@@ -294,46 +369,31 @@ def sync_library_tasks(config: dict = None) -> dict:
     tasks_service = load_google_tasks_service()
     task_list_id = get_or_create_tasklist(tasks_service, task_list_name)
 
-    # Fetch existing uncompleted tasks to avoid duplicates
-    existing_tasks_res = tasks_service.tasks().list(
-        tasklist=task_list_id,
-        showCompleted=False,
-        showHidden=False,
-        maxResults=100,
-    ).execute()
-    existing_tasks = existing_tasks_res.get("items", [])
-
-    # Map existing titles and notes for deduplication
-    existing_titles = {
-        task.get("title", "").strip().lower()
-        for task in existing_tasks
-    }
-    existing_notes = {
-        task.get("notes", "")
-        for task in existing_tasks
-    }
+    # Fetch ALL existing tasks (including completed and hidden) to avoid duplicates
+    existing_tasks = load_all_existing_tasks(tasks_service, task_list_id)
+    logger.info(
+        f"Retrieved {len(existing_tasks)} existing tasks across task lists "
+        "(including completed and hidden) for duplicate verification."
+    )
 
     added_tasks = []
     skipped_tasks = []
 
     for book in due_loans:
         expected_title = f"Return: {book['title']}"
-        checkout_id_marker = f"Checkout ID: {book['checkout_id']}"
 
-        # Deduplication check
-        is_duplicate = False
-        if expected_title.lower() in existing_titles:
-            is_duplicate = True
-        elif any(checkout_id_marker in notes for notes in existing_notes):
-            is_duplicate = True
-
-        if is_duplicate:
-            logger.info(f"Skipping already existing task: {expected_title}")
-            skipped_tasks.append(book)
+        is_dup, reason = is_book_already_in_tasks(book, existing_tasks)
+        if is_dup:
+            logger.info(f"Skipping already existing book in todo: '{book['title']}' ({reason})")
+            skipped_tasks.append({
+                "title": book["title"],
+                "reason": reason,
+            })
             continue
 
         # Format due date as RFC 3339 string at midnight UTC
         due_iso = f"{book['due_date'].strftime('%Y-%m-%d')}T00:00:00.000Z"
+        checkout_id_marker = f"Checkout ID: {book['checkout_id']}"
         notes_lines = [
             f"Library: Cupertino Library (SCCLD)",
             f"Due Date: {book['due_date'].strftime('%a, %b %-d, %Y')}",
@@ -352,6 +412,15 @@ def sync_library_tasks(config: dict = None) -> dict:
 
         logger.info(f"Adding task: '{expected_title}' (Due: {book['due_date']})")
         created = tasks_service.tasks().insert(tasklist=task_list_id, body=task_body).execute()
+        
+        # Add newly created task to existing_tasks in-memory to prevent duplicates in same run
+        existing_tasks.append({
+            "id": created.get("id"),
+            "title": expected_title,
+            "notes": "\n".join(notes_lines),
+            "status": "needsAction",
+        })
+
         added_tasks.append({
             "task_id": created.get("id"),
             "title": expected_title,
@@ -360,7 +429,7 @@ def sync_library_tasks(config: dict = None) -> dict:
 
     logger.info(
         f"Library sync complete! Added: {len(added_tasks)}, "
-        f"Skipped (already exist): {len(skipped_tasks)}, "
+        f"Skipped (already in todo/completed): {len(skipped_tasks)}, "
         f"Total loans: {len(all_loans)}."
     )
 
