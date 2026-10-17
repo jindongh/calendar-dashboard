@@ -54,3 +54,45 @@ sudo systemctl enable calendar-dashboard
 sudo systemctl start calendar-dashboard
 sudo systemctl status calendar-dashboard
 ```
+
+## Cupertino Library (SCCLD) Return Reminder
+
+Automatically fetches books due next week from your Cupertino Library (Santa Clara County Library District) account every Saturday at 8:00 AM and syncs them to Google Tasks under a dedicated "Library" list.
+
+### 1. Configure Library Credentials
+Copy the example config:
+```bash
+cp library_config.example.json library_config.json
+```
+Edit `library_config.json`:
+```json
+{
+  "card_number": "YOUR_LIBRARY_CARD_NUMBER",
+  "pin": "YOUR_PIN",
+  "subdomain": "sccl",
+  "task_list_name": "Library",
+  "sync_day_of_week": 5,
+  "sync_hour": 8,
+  "sync_minute": 0,
+  "days_ahead": 8,
+  "timezone": "America/Los_Angeles"
+}
+```
+Or run the interactive setup wizard:
+```bash
+python3 library_service.py --setup
+```
+
+### 2. Manual Commands
+* **Test connection & list current loans:**
+  ```bash
+  python3 library_service.py --list-loans
+  ```
+* **Run sync immediately:**
+  ```bash
+  python3 library_service.py --sync
+  ```
+* **Trigger via Web API:**
+  ```bash
+  curl -X POST http://localhost:8080/api/library/sync
+  ```

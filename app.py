@@ -470,6 +470,49 @@ def complete_task(list_id, task_id):
         }), 500
 
 
+@app.route("/api/library/status", methods=["GET"])
+def library_status():
+    from library_service import CONFIG_PATH, TOKEN_PATH
+    has_config = CONFIG_PATH.exists()
+    has_token = TOKEN_PATH.exists()
+    config_summary = {}
+
+    if has_config:
+        try:
+            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+                config_summary = {
+                    "subdomain": cfg.get("subdomain", "sccl"),
+                    "task_list_name": cfg.get("task_list_name", "Library"),
+                    "sync_day_of_week": cfg.get("sync_day_of_week", 5),
+                    "sync_hour": cfg.get("sync_hour", 8),
+                    "sync_minute": cfg.get("sync_minute", 0),
+                    "days_ahead": cfg.get("days_ahead", 8),
+                    "has_credentials": bool(cfg.get("card_number") and cfg.get("pin")),
+                }
+        except Exception as e:
+            config_summary = {"error": str(e)}
+
+    return jsonify({
+        "configured": has_config and config_summary.get("has_credentials", False),
+        "has_token": has_token,
+        "config": config_summary,
+    })
+
+
+@app.route("/api/library/sync", methods=["POST"])
+def trigger_library_sync():
+    try:
+        from library_service import sync_library_tasks
+        res = sync_library_tasks()
+        return jsonify(res)
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "error": str(e),
+        }), 500
+
+
 if __name__ == "__main__":
 
     app.run(

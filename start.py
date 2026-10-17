@@ -30,12 +30,25 @@ cast_process = subprocess.Popen(
 )
 
 
+print("Starting Library Sync Scheduler...")
+
+
+library_process = subprocess.Popen(
+    [
+        sys.executable,
+        "library_service.py",
+        "--scheduler",
+    ]
+)
+
+
 try:
 
     while True:
 
         flask_code = flask_process.poll()
         cast_code = cast_process.poll()
+        library_code = library_process.poll()
 
         if flask_code is not None:
 
@@ -69,6 +82,26 @@ try:
                 ]
             )
 
+        if library_code is not None:
+
+            print(
+                f"Library scheduler exited with code {library_code}"
+            )
+
+            print(
+                "Restarting Library Scheduler..."
+            )
+
+            time.sleep(5)
+
+            library_process = subprocess.Popen(
+                [
+                    sys.executable,
+                    "library_service.py",
+                    "--scheduler",
+                ]
+            )
+
         time.sleep(5)
 
 
@@ -78,3 +111,4 @@ except KeyboardInterrupt:
 
     flask_process.terminate()
     cast_process.terminate()
+    library_process.terminate()

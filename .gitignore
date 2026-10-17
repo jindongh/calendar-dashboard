@@ -1,3 +1,6 @@
 venv/
 credentials.json
 token.json
+library_config.json
+__pycache__/
+*.pyc

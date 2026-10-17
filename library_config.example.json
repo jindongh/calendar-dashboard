@@ -1,0 +1,11 @@
+{
+  "card_number": "YOUR_LIBRARY_CARD_NUMBER",
+  "pin": "YOUR_PIN",
+  "subdomain": "sccl",
+  "task_list_name": "Library",
+  "sync_day_of_week": 5,
+  "sync_hour": 8,
+  "sync_minute": 0,
+  "days_ahead": 8,
+  "timezone": "America/Los_Angeles"
+}
