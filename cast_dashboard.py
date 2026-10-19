@@ -163,10 +163,46 @@ def main():
         last_cast_time = 0
 
 
+        quiet_logged = False
+
         while True:
 
             # =================================================
-            # Find Nest Hub
+            # Quiet hours (22:00 - 07:00)
+            # =================================================
+
+            if is_quiet_hours():
+
+                if cast is not None:
+                    app_id, app_name = check_status(cast)
+                    if app_id == APP_DASHCAST:
+                        log("Quiet hours: stopping Dashboard Cast...")
+                        try:
+                            cast.quit_app()
+                            log("Dashboard Cast stopped.")
+                        except Exception as e:
+                            log(
+                                f"Failed to stop Dashboard Cast: "
+                                f"{type(e).__name__}: {e}"
+                            )
+                        quiet_logged = False
+                    elif not quiet_logged:
+                        log(
+                            f"Quiet hours: Dashboard is not running "
+                            f"(APP_ID={app_id}, APP={app_name})"
+                        )
+                        quiet_logged = True
+                elif not quiet_logged:
+                    log("Quiet hours: Dashboard is not running.")
+                    quiet_logged = True
+
+                time.sleep(CHECK_INTERVAL)
+                continue
+
+            quiet_logged = False
+
+            # =================================================
+            # Find Nest Hub (Daytime only)
             # =================================================
 
             if cast is None:
@@ -219,36 +255,12 @@ def main():
 
 
             # =================================================
-            # Check current state
+            # Check current state (Daytime)
             # =================================================
 
             app_id, app_name = check_status(
                 cast
             )
-
-            if is_quiet_hours():
-                if app_id is None:
-                    log("Nest Hub unavailable during quiet hours.")
-                    cast = None
-                    time.sleep(RETRY_INTERVAL)
-                    continue
-                if app_id == APP_DASHCAST:
-                    log("Quiet hours: stopping Dashboard Cast...")
-                    try:
-                        cast.quit_app()
-                        log("Dashboard Cast stopped.")
-                    except Exception as e:
-                        log(
-                                f"Failed to stop Dashboard Cast: "
-                                f"{type(e).__name__}: {e}"
-                                )
-                else:
-                    log(
-                            f"Quiet hours: Dashboard is not running "
-                            f"(APP_ID={app_id}, APP={app_name})"
-                            )
-                time.sleep(CHECK_INTERVAL)
-                continue
 
             # -------------------------------------------------
             # Nest Hub disconnected
